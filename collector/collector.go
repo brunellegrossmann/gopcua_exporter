@@ -47,11 +47,22 @@ type metricProperties struct {
 }
 
 func NewCollector(cfg *CollectorConfig) (*Collector, error) {
-	var err error
-	c := &Collector{Logger: cfg.Logger, ServerConfig: *cfg.Config.ServerConfig, opcuaClient: client.NewClientFromServerConfig(*cfg.Config.ServerConfig, cfg.Logger)}
-	if err = c.opcuaClient.Connect(context.Background()); err != nil {
-		c.Logger.Fatal("cannot connect opcua client %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := client.NewClientFromServerConfig(ctx, *cfg.Config.ServerConfig, cfg.Logger)
+	if err != nil {
+		cfg.Logger.Fatal("Couldn't instantiate opcua client: %v", err)
+		return nil, err
 	}
+
+	c := &Collector{Logger: cfg.Logger, ServerConfig: *cfg.Config.ServerConfig, opcuaClient: client}
+
+	if err = c.opcuaClient.Connect(ctx); err != nil {
+		c.Logger.Fatal("cannot connect opcua client %v", err)
+		return c, err
+	}
+
 	c.ReloadMetrics(cfg.Config.MetricsConfig)
 	c.statsMetricsCache = append(c.statsMetricsCache,
 		newMetric("opcua_scrape_walk_duration_seconds", "Time OPCUA walk/bulkwalk took.", prometheus.GaugeValue, nil),
@@ -79,7 +90,10 @@ func (c Collector) Describe(ch chan<- *prometheus.Desc) {
 func (c Collector) Collect(ch chan<- prometheus.Metric) {
 	start := time.Now()
 
-	opcuaResponse, readDuration, err := c.scrapeTarget()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	opcuaResponse, readDuration, err := c.scrapeTarget(ctx)
 	if err != nil {
 		c.Logger.Info("error scraping target : %s", err)
 		ch <- prometheus.NewInvalidMetric(c.errorDesc, err)
@@ -158,7 +172,7 @@ func newMetric(name string, help string, typ prometheus.ValueType, labels map[st
 	}
 }
 
-func (c *Collector) scrapeTarget() (*ua.ReadResponse, float64, error) {
+func (c *Collector) scrapeTarget(ctx context.Context) (*ua.ReadResponse, float64, error) {
 	var opcuaNodeIDs []*ua.ReadValueID
 	for _, metric := range c.opcuaMetricsCache {
 		opcuaNodeIDs = append(opcuaNodeIDs, metric.nodeReadValueID)
@@ -170,7 +184,7 @@ func (c *Collector) scrapeTarget() (*ua.ReadResponse, float64, error) {
 		TimestampsToReturn: ua.TimestampsToReturnBoth,
 	}
 	start := time.Now()
-	resp, err := c.opcuaClient.Read(req)
+	resp, err := c.opcuaClient.Read(ctx, req)
 	if err != nil {
 		c.Logger.Err("read failed: %s", err)
 		return nil, -1, err

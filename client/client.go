@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/tls"
 	"strings"
@@ -12,8 +13,8 @@ import (
 	"github.com/skilld-labs/telemetry-opcua-exporter/log"
 )
 
-func NewClientFromServerConfig(c config.ServerConfig, l log.Logger) *opcua.Client {
-	e := findEndpoint(c, l)
+func NewClientFromServerConfig(ctx context.Context, c config.ServerConfig, l log.Logger) (*opcua.Client, error) {
+	e := findEndpoint(ctx, c, l)
 	crt := loadCertificate(c, l)
 
 	o := []opcua.Option{}
@@ -26,8 +27,8 @@ func NewClientFromServerConfig(c config.ServerConfig, l log.Logger) *opcua.Clien
 	return opcua.NewClient(c.Endpoint, o...)
 }
 
-func findEndpoint(c config.ServerConfig, l log.Logger) *ua.EndpointDescription {
-	ee, err := opcua.GetEndpoints(c.Endpoint)
+func findEndpoint(ctx context.Context, c config.ServerConfig, l log.Logger) *ua.EndpointDescription {
+	ee, err := opcua.GetEndpoints(ctx, c.Endpoint)
 	if err != nil {
 		l.Fatal("get endpoints failed: %v", err)
 	}
